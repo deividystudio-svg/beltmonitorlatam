@@ -45,13 +45,21 @@
     tbody tr:last-child td { border-bottom: none; }
     tbody tr:hover td { background: var(--bg3); }
     .col-origem { width: 160px; } .col-voo { width: 115px; } .col-calco { width: 110px; }
-    .col-esteira { width: 80px; } .col-ppax { width: 110px; } .col-pbag { width: 160px; } .col-ubag { width: 110px; } .col-prio { width: 100px; }
+    .col-esteira { width: 80px; } .col-timer { width: 90px; } .col-pbag { width: 160px; } .col-ubag { width: 110px; } .col-prio { width: 100px; }
 
     /* ESTEIRA */
     .esteira-input { font-family: var(--mono); font-size: 20px; font-weight: 600; color: var(--accent); background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); padding: 2px 6px; width: 56px; outline: none; text-align: center; transition: border-color 0.15s, background 0.15s; }
     .esteira-input:hover { border-color: var(--border2); }
     .esteira-input:focus { border-color: var(--accent); background: var(--bg3); }
     .esteira-input::placeholder { color: var(--text3); font-size: 12px; font-family: var(--sans); font-weight: 400; }
+
+    /* TIMER */
+    .timer { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text2); white-space: nowrap; }
+    .timer.t-ok       { color: var(--green-text); }
+    .timer.t-late     { color: var(--orange-text); }
+    .timer.t-verylate { color: var(--red-text); }
+    .timer.t-urgent   { color: var(--urgent-text); animation: pulse-urgent 1s ease-in-out infinite; }
+    .timer.t-done     { color: var(--text3); }
 
     /* PRIO */
     .prio-toggle { display: inline-flex; border-radius: 99px; border: 1px solid var(--border2); overflow: hidden; }
@@ -216,7 +224,7 @@
         <th class="col-voo">VOO</th>
         <th class="col-calco">Calço</th>
         <th class="col-esteira">Esteira</th>
-        <th class="col-ppax">1º Pax</th>
+        <th class="col-timer">Tempo</th>
         <th class="col-pbag">1ª Bag</th>
         <th class="col-ubag">Última Bag</th>
         <th class="col-prio">Prio</th>
@@ -599,7 +607,7 @@ function renderTable() {
       </div></td>
       <td><div class="time-cell"><span class="time-value ${!r.calco?'empty':''}" onclick="openPicker(${r.id},'calco')">${r.calco||'Definir'}</span></div></td>
       <td><input class="esteira-input" type="text" maxlength="4" placeholder="—" value="${r.esteira||''}" oninput="saveEsteira(${r.id},this.value)" /></td>
-      <td><div class="time-cell"><span class="time-value ${!r.primeira_pax?'empty':''}" onclick="openPicker(${r.id},'primeira_pax')">${r.primeira_pax||'Definir'}</span></div></td>
+      <td><span class="${timerClass(r)}" id="timer-${r.id}">${timerText(r)}</span></td>
       <td><div class="time-cell">
         <span class="time-value ${!r.primeira_bag?'empty':''}" onclick="openPicker(${r.id},'primeira_bag')">${r.primeira_bag||'Definir'}</span>
         ${badge(st)}
@@ -652,8 +660,8 @@ function renderCards() {
           <div class="card-field-val ${!r.calco?'empty':''}" onclick="openPicker(${r.id},'calco')">${r.calco||'Definir'}</div></div>
         <div class="card-field"><div class="card-field-label">Esteira</div>
           <input class="esteira-input" type="text" maxlength="4" placeholder="—" value="${r.esteira||''}" oninput="saveEsteira(${r.id},this.value)" style="width:100%;font-size:22px;padding:6px;" /></div>
-        <div class="card-field"><div class="card-field-label">1º Pax</div>
-          <div class="card-field-val ${!r.primeira_pax?'empty':''}" onclick="openPicker(${r.id},'primeira_pax')">${r.primeira_pax||'Definir'}</div></div>
+        <div class="card-field" style="grid-column:1/-1"><div class="card-field-label">Tempo desde calço</div>
+          <div style="padding:4px 0"><span class="${timerClass(r)}" id="ctimer-${r.id}" style="font-size:18px">${timerText(r)}</span></div></div>
         <div class="card-field"><div class="card-field-label">Última Bag</div>
           <div class="card-field-val ${!r.ultima_bag?'empty':''}" onclick="openPicker(${r.id},'ultima_bag')">${r.ultima_bag||'Definir'}</div></div>
         <div class="card-field"><div class="card-field-label">1ª Bag</div>
@@ -690,6 +698,57 @@ function closeOrigemCard(id) {
   if (wrap) wrap.style.display = 'none';
 }
 
+/* ── TIMER ── */
+function elapsedMinutes(row) {
+  const cMin = timeToMinutes(row.calco);
+  if (cMin === null) return null;
+  const t      = spNow();
+  const nowMin = t.getHours() * 60 + t.getMinutes();
+  // midnight crossover
+  return nowMin >= cMin ? nowMin - cMin : (1440 - cMin) + nowMin;
+}
+function timerText(row) {
+  if (!row.calco) return '—';
+  const lim = getLimits();
+  // if bag delivered, show final elapsed at delivery time
+  const bMin = timeToMinutes(row.primeira_bag);
+  const cMin = timeToMinutes(row.calco);
+  let mins;
+  if (bMin !== null && cMin !== null) {
+    mins = bMin >= cMin ? bMin - cMin : (1440 - cMin) + bMin;
+  } else {
+    mins = elapsedMinutes(row);
+  }
+  if (mins === null) return '—';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return h > 0 ? `${h}h ${pad(m)}m` : `${m}m`;
+}
+function timerClass(row) {
+  if (!row.calco) return 'timer';
+  const lim  = getLimits();
+  const bMin = timeToMinutes(row.primeira_bag);
+  // if bag delivered, show muted
+  if (bMin !== null) return 'timer t-done';
+  const mins = elapsedMinutes(row);
+  if (mins === null) return 'timer';
+  if (mins >= lim.urgent)   return 'timer t-urgent';
+  if (mins >= lim.veryLate) return 'timer t-verylate';
+  if (mins >= lim.late)     return 'timer t-late';
+  return 'timer t-ok';
+}
+
+function tickTimers() {
+  rows.forEach(r => {
+    const el  = document.getElementById('timer-' + r.id);
+    const cel = document.getElementById('ctimer-' + r.id);
+    const txt = timerText(r);
+    const cls = timerClass(r);
+    if (el)  { el.textContent  = txt; el.className = cls; }
+    if (cel) { cel.textContent = txt; cel.className = cls + ' ' + cel.className.split(' ').slice(1).join(' '); }
+  });
+}
+
 /* ── DATA ACTIONS ── */
 function saveEsteira(id, val) {
   const row = rows.find(r => r.id === id);
@@ -706,7 +765,7 @@ function setPrio(id, val) {
   renderTable();
 }
 function addRow() {
-  rows.push({ id: nextId++, prio:'', origem_name:'', origem_iata:'', voo:'', calco:'', esteira:'', primeira_pax:'', primeira_bag:'', ultima_bag:'' });
+  rows.push({ id: nextId++, prio:'', origem_name:'', origem_iata:'', voo:'', calco:'', esteira:'', primeira_bag:'', ultima_bag:'' });
   renderTable();
 }
 
@@ -829,7 +888,7 @@ document.addEventListener('keydown', e => {
 
 /* ── INIT ── */
 updateClock();
-setInterval(updateClock, 1000);
+setInterval(() => { updateClock(); tickTimers(); }, 1000);
 setInterval(renderTable, 15000);
 
 const savedMode = localStorage.getItem('beltmonitor_mode') || 'dom';
